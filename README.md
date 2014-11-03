@@ -18,7 +18,7 @@ You may need to use `sudo` for some of these commands.
 Usage
 -----
 
-Export users from the admin console (Users -> User Data Export) to a file called users.csv
-Export posts only from the export menu into a file called posts.xml
++ Export users from the admin console (Users -> User Data Export) to a file called users.csv
++ Export posts only from the export menu into a file called posts.xml
 
 `coffee wp2ghost.coffee`
