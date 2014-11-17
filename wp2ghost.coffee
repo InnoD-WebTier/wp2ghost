@@ -2,6 +2,7 @@ fs = require 'fs'
 xml = require 'xml2js'
 csv = require 'csv-parse'
 slugs = require 'slug'
+uuid = require 'uuid'
 tomd = require('to-markdown').toMarkdown
 Promise = (require 'bluebird').Promise
 
@@ -18,7 +19,10 @@ findID = (user) ->
         return parseInt(users[user].ID)
     throw "No user found"
 
-parseUser = (user) -> 
+parseUser = (user) ->
+    if user.user_email.length == 0
+        user.user_email = uuid.v4() + 'noemail@email.com'
+
     return {
         id: 1000 + parseInt(user.ID)
         name: if user.first_name.length and user.last_name.length then "#{user.first_name} #{user.last_name}" else user.display_name
@@ -26,7 +30,7 @@ parseUser = (user) ->
         email: user.user_email
         image: null
         cover: null
-        bio: user.description
+        bio: user.description.substring(0, 200)
         website: user.user_url
         location: null
         accessibility: null
@@ -35,15 +39,17 @@ parseUser = (user) ->
         meta_title: null
         meta_description: null
         last_login: null
-        created_at: new Date(user.user_registered).getTime() / 1000
+        created_at: new Date(user.user_registered).getTime()
         created_by: 1
-        updated_at: new Date(user.user_registered).getTime() / 1000
+        updated_at: new Date(user.user_registered).getTime()
         updated_by: 1
     }
 
 parsePost = (post) ->
     creator = 1000 + findID(post['dc:creator'][0])
-    
+    if post.title[0].length == 0
+        post.title[0] = 'NO TITLE' + uuid.v4()
+
     return {
         id: parseInt(post['wp:post_id'][0])
         title: post.title[0]
@@ -58,17 +64,17 @@ parsePost = (post) ->
         meta_title: null
         meta_description: null
         author_id: creator
-        created_at: new Date(post['wp:post_date'][0]).getTime() / 1000
+        created_at: new Date(post['wp:post_date'][0]).getTime()
         created_by: creator
-        updated_at: new Date(post['wp:post_date'][0]).getTime() / 1000
+        updated_at: new Date(post['wp:post_date'][0]).getTime()
         updated_by: creator
-        published_at: new Date(post['wp:post_date'][0]).getTime() / 1000
+        published_at: new Date(post['wp:post_date'][0]).getTime()
         published_by: creator
     }
 
 xml.parseString posts, (err, result) ->
     data = result.rss.channel[0]
-    posts = data.item
+    posts = data.item.filter((item) -> item['wp:status'][0] == 'publish')
 
     csv fs.readFileSync('users.csv'), {columns: true}, (err, result) -> 
         users = result.reduce ((dict, obj) -> dict[obj['user_login']] = obj if obj['user_login']?; return dict;), {}
@@ -98,6 +104,22 @@ xml.parseString posts, (err, result) ->
                 users: (parseUser(users[user]) for user in Object.keys(users))
                 roles_users: []
 
-        console.log output.data
+        users_with_posts = (post.author_id for post in output.data.posts)
+        nf = (user_id) ->
+            for user in output.data.users
+                if user.id == user_id
+                    return user
+
+        Array::unique = ->
+            out = {}
+            out[@[key]] = @[key] for key in [0...@length]
+            value for key, value of out
+        users_with_posts = users_with_posts.unique()
+        # console.log users_with_posts
+
+        new_users = (nf(user) for user in users_with_posts)
+        # console.log new_users
+        output.data.users = new_users
+        console.log JSON.stringify(output)
 
         
