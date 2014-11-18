@@ -5,12 +5,13 @@ slugs = require 'slug'
 uuid = require 'uuid'
 tomd = require('to-markdown').toMarkdown
 Promise = (require 'bluebird').Promise
+_ = require('lodash')
 
 posts = fs.readFileSync('posts.xml')
 users = {}
 
 now = () ->
-    return new Date().getTime() / 1000
+    return new Date().getTime()
 
 findID = (user) ->
     if user is ''
@@ -19,18 +20,37 @@ findID = (user) ->
         return parseInt(users[user].ID)
     throw "No user found"
 
+toTitleCase = (str) ->
+    str.replace /\w\S*/g, (txt) ->
+        txt[0].toUpperCase() + txt[1..txt.length - 1].toLowerCase()
+
 parseUser = (user) ->
-    if user.user_email.length == 0
-        user.user_email = uuid.v4() + 'noemail@email.com'
+    if user.first_name == undefined && user.display_name == undefined
+        return
+
+    givenName = 'NO NAME'
+    if (user.first_name && user.first_name.length && user.last_name && user.last_name.length) 
+        fullName = ("#{user.first_name} #{user.last_name}")
+        givenName = toTitleCase(fullName)
+    else 
+        if (user.display_name.split(' ').length > 1)
+            givenName = toTitleCase(user.display_name)
+        else
+            givenName = user.display_name
+
+    if !user.user_email || user.user_email.length == 0
+        user.user_email = 'fixme@fixme.fixme';
+        givenName = '__' + givenName;
+
 
     return {
         id: 1000 + parseInt(user.ID)
-        name: if user.first_name.length and user.last_name.length then "#{user.first_name} #{user.last_name}" else user.display_name
+        name: givenName
         slug: user.user_nicename
         email: user.user_email
         image: null
         cover: null
-        bio: user.description.substring(0, 200)
+        bio: if user.description then user.description.substring(0, 200) else ''
         website: user.user_url
         location: null
         accessibility: null
@@ -47,15 +67,39 @@ parseUser = (user) ->
 
 parsePost = (post) ->
     creator = 1000 + findID(post['dc:creator'][0])
-    if post.title[0].length == 0
-        post.title[0] = 'NO TITLE' + uuid.v4()
+    post_content = post['content:encoded'][0]
+    post_title = post.title[0]
+    if post_content.length == 0
+        return
+    if post_title.lengt == 0
+        post.title[0] = 'NO TITLE ' + uuid.v4()
+
+    regexes = [
+        /\[caption.*?width=["'](\d+)["'].*?(<([a-z]+)\s+.+?(?:\/>)(?:.+?\/\3>)?)\s*(.*?)\[\/caption\]/g,
+        /\[caption.*?width=["'](\d+)["'].*?caption=["']([^"']*)["'].*?(<[a-z]+\s+.+?\/>)\[\/caption\]/g,
+        /(.*?)<(b|em|i|small|strong|sub|sup|ins|del|mark)>([\s\n]*)(.*?)([\s\n]*)<\/\2>(.*)/g,
+        /(<div.*?>)+(<img.*\/>)(<\/div>)+/g,
+        /<div><\/div>/g,
+    ]
+
+    replacements = [
+        '<center>$2\n<small>$4</small></center>',
+        '<center>$3\n<small>$2</small></center>',
+        '$1$3<$2>$4</$2>$5$6',
+        '$2',
+        '',
+    ]
+
+    _.forEach(regexes, (regex, i) ->
+      post_content = post_content.replace(regex, replacements[i])
+    )
 
     return {
         id: parseInt(post['wp:post_id'][0])
         title: post.title[0]
         slug: slugs(post.title[0])
-        markdown: tomd(post['content:encoded'][0])
-        html: post['content:encoded'][0]
+        markdown: tomd(post_content)
+        html: post_content
         image: null
         featured: 0
         page: 0
@@ -93,33 +137,27 @@ xml.parseString posts, (err, result) ->
                 tag_id++
         (((((pushTag(cat.$.nicename); post_tags.push({tag_id: tags[cat.$.nicename].id, post_id: parseInt(post['wp:post_id'][0])})) if cat.$.domain is 'post_tag') for cat in post.category) if post.category?) for post in posts)
 
+        parsedUsers = _.compact(parseUser(users[user]) for user in Object.keys(users))
+        parsedPosts = _.compact(parsePost(post) for post in posts)
+        usersWithPosts = _.filter(parsedUsers, (user) ->
+          user_id = user.id
+          for post in parsedPosts
+            if user.id == post.author_id
+              return true
+          return false
+        )
+
         output =
             meta:
                 exported_on: now()
                 version: '003'
             data:
-                posts: (parsePost(post) for post in posts)
+                posts: parsedPosts
                 tags: (tags[tag] for tag in Object.keys(tags))
                 posts_tags: post_tags
-                users: (parseUser(users[user]) for user in Object.keys(users))
+                users: usersWithPosts
                 roles_users: []
 
-        users_with_posts = (post.author_id for post in output.data.posts)
-        nf = (user_id) ->
-            for user in output.data.users
-                if user.id == user_id
-                    return user
-
-        Array::unique = ->
-            out = {}
-            out[@[key]] = @[key] for key in [0...@length]
-            value for key, value of out
-        users_with_posts = users_with_posts.unique()
-        # console.log users_with_posts
-
-        new_users = (nf(user) for user in users_with_posts)
-        # console.log new_users
-        output.data.users = new_users
         console.log JSON.stringify(output)
 
         
