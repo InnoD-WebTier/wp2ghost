@@ -11,7 +11,7 @@
   "dependencies": {
     "bluebird": "^2.3.10",
     "csv-parse": "0.0.6",
-    "lodash": "^2.4.1",
+    "lodash": "^4.17.15",
     "slug": "^0.8.0",
     "to-markdown": "0.0.2",
     "uuid": "^2.0.1",
